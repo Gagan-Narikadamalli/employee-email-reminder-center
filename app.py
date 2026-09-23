@@ -60,7 +60,6 @@ def maintenance_page(error: str = "") -> str:
     :root{{--blue:#164b8f;--light:#f4f8fc;--ink:#17223b;--muted:#667085;}}
     *{{box-sizing:border-box}} body{{margin:0;min-height:100vh;display:grid;place-items:center;
     padding:24px;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--light);color:var(--ink)}}
-    body:before{{content:'';position:fixed;inset:0 0 auto;height:8px;background:linear-gradient(90deg,#1b75bb 0 25%,#f4c542 25% 50%,#e54b4b 50% 75%,#36a269 75%)}}
     .panel{{width:min(620px,100%);background:#fff;border:1px solid #d9e2f0;border-radius:20px;padding:32px;
     box-shadow:0 14px 38px rgba(18,54,92,.12);text-align:center}}
     .mark{{width:68px;height:68px;margin:0 auto 18px;border-radius:20px;display:grid;place-items:center;
@@ -147,7 +146,6 @@ CSS = """
 :root { --ink:#17223b; --muted:#667085; --line:#d9e2f0; --bg:#f4f8fc; --card:#ffffff; --ok:#087f5b; --warn:#b54708; --bad:#b42318; --primary:#164b8f; --primary-dark:#103865; --sos-blue:#1b75bb; --sos-yellow:#f4c542; --sos-red:#e54b4b; --sos-green:#36a269; --gmail:#c5221f; }
 * { box-sizing:border-box; }
 body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
-body:before { content:""; display:block; height:8px; background:linear-gradient(90deg,var(--sos-blue) 0 25%,var(--sos-yellow) 25% 50%,var(--sos-red) 50% 75%,var(--sos-green) 75%); }
 main { max-width:1120px; margin:0 auto; padding:26px 18px 60px; }
 h1 { margin:0; font-size:30px; } h2 { margin:0 0 10px; font-size:20px; }
 p { line-height:1.5; }
@@ -160,6 +158,10 @@ p { line-height:1.5; }
 .status-ok { color:var(--ok); font-weight:750; } .status-warn { color:var(--warn); font-weight:750; } .status-bad { color:var(--bad); font-weight:750; }
 .upload { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 .connect-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.workbook-slots { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+.workbook-slot { display:flex; gap:9px; align-items:flex-start; border:1px solid var(--line); border-radius:10px; padding:10px; background:#f9fafb; }
+.workbook-slot input { margin-top:3px; flex:0 0 auto; }
+.workbook-slot-name { display:block; font-weight:750; color:#344054; overflow-wrap:anywhere; }
 .employee-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap; }
 label { display:block; font-weight:700; margin-bottom:6px; }
 input[type=file], input[type=text], textarea { width:100%; border:1px solid #d0d5dd; border-radius:9px; padding:10px; background:#fff; font:inherit; }
@@ -186,7 +188,7 @@ summary { cursor:pointer; font-weight:700; color:#475467; }
 .recipient-select input { margin-top:4px; flex:0 0 auto; }
 .selected-card { border-color:var(--sos-blue); box-shadow:0 7px 22px rgba(27,117,187,.14); }
 .channel-actions { display:flex; gap:8px; flex-wrap:wrap; }
-@media (max-width:760px) { .upload,.metrics { grid-template-columns:1fr; } }
+@media (max-width:760px) { .upload,.metrics,.workbook-slots { grid-template-columns:1fr; } }
 """
 
 
@@ -565,10 +567,12 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
     <div class='card'><h2>Analyze employee reminders</h2><form id='analyzeForm' method='post' action='/analyze' enctype='multipart/form-data'><div class='upload'>
       <div><label>Unfiltered appointments CSV</label><input type='file' name='csv_file' accept='.csv' required><div class='muted small' style='margin-top:6px'>Converted, cancelled, deleted, and non-convertible rows are removed automatically.</div></div>
       <div><label>Employee contacts Excel</label><input id='xlsxFile' type='file' name='xlsx_file' accept='.xlsx'>
-      <div id='savedWorkbookStatus' class='muted small' style='margin-top:6px'>Checking for a saved employee workbook...</div></div>
+      <div id='savedWorkbookStatus' class='muted small' style='margin-top:6px'>Checking for saved employee workbooks...</div>
+      <div id='savedWorkbookSlots' class='workbook-slots' aria-label='Saved employee workbooks'></div></div>
     </div>
-    <div class='connect-row' style='margin-top:12px'><input id='saveWorkbook' type='checkbox' checked><label for='saveWorkbook' style='margin:0'>Save this employee workbook in this browser</label></div>
-    <div class='actions'><button class='primary' type='submit'>Analyze Files</button><button id='clearSavedWorkbook' class='secondary' type='button'>Remove saved workbook</button></div>
+    <div class='connect-row' style='margin-top:12px'><input id='saveWorkbook' type='checkbox'><label for='saveWorkbook' style='margin:0'>Save this employee workbook in this browser</label></div>
+    <div class='muted small' style='margin-top:5px'>Saving is off until you select it. The newest saved workbook becomes Slot 1 and the previous workbook moves to Slot 2.</div>
+    <div class='actions'><button class='primary' type='submit'>Analyze Files</button><button id='clearSavedWorkbook' class='secondary' type='button'>Remove both saved workbooks</button></div>
     <div id='analyzeStatus' class='muted small' style='margin-top:8px'></div></form></div>"""]
 
     if error:
@@ -690,37 +694,73 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
         req.onerror = () => reject(req.error);
       });
     }
-    async function savedWorkbook() {
+    async function getWorkbook(id) {
       const db = await openWorkbookDb();
       return new Promise((resolve, reject) => {
-        const req = db.transaction(workbookStore).objectStore(workbookStore).get('employee-contacts');
+        const req = db.transaction(workbookStore).objectStore(workbookStore).get(id);
         req.onsuccess = () => resolve(req.result || null);
         req.onerror = () => reject(req.error);
       });
     }
+    async function savedWorkbooks() {
+      const [slot1, slot2, legacy] = await Promise.all([
+        getWorkbook('employee-contacts-1'), getWorkbook('employee-contacts-2'), getWorkbook('employee-contacts')
+      ]);
+      if (!slot1 && legacy) {
+        const db = await openWorkbookDb();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(workbookStore, 'readwrite');
+          tx.objectStore(workbookStore).put({...legacy, id:'employee-contacts-1'});
+          tx.objectStore(workbookStore).delete('employee-contacts');
+          tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+        });
+        return [await getWorkbook('employee-contacts-1'), slot2];
+      }
+      return [slot1, slot2];
+    }
     async function storeWorkbook(file) {
+      const current = await getWorkbook('employee-contacts-1');
       const db = await openWorkbookDb();
       return new Promise((resolve, reject) => {
         const tx = db.transaction(workbookStore, 'readwrite');
-        tx.objectStore(workbookStore).put({id:'employee-contacts', name:file.name, type:file.type, blob:file, savedAt:Date.now()});
+        const store = tx.objectStore(workbookStore);
+        if (current) store.put({...current, id:'employee-contacts-2'});
+        else store.delete('employee-contacts-2');
+        store.put({id:'employee-contacts-1', name:file.name, type:file.type, blob:file, savedAt:Date.now()});
         tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
       });
     }
-    async function removeWorkbook() {
+    async function removeWorkbooks() {
       const db = await openWorkbookDb();
       return new Promise((resolve, reject) => {
         const tx = db.transaction(workbookStore, 'readwrite');
-        tx.objectStore(workbookStore).delete('employee-contacts');
+        const store = tx.objectStore(workbookStore);
+        store.delete('employee-contacts');
+        store.delete('employee-contacts-1');
+        store.delete('employee-contacts-2');
         tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
       });
     }
     async function refreshWorkbookStatus() {
       const node = document.getElementById('savedWorkbookStatus');
+      const slotsNode = document.getElementById('savedWorkbookSlots');
       if (!node) return;
       try {
-        const saved = await savedWorkbook();
-        node.textContent = saved ? `Saved workbook: ${saved.name}. You only need to select the new CSV.` : 'No workbook is saved yet. Select it once and keep “Save” checked.';
+        const saved = await savedWorkbooks();
+        const count = saved.filter(Boolean).length;
+        node.textContent = count ? `${count} saved workbook${count === 1 ? '' : 's'} available. Choose a slot or upload a new Excel file.` : 'No workbook is saved. Upload one, then select “Save” if you want to keep it.';
+        if (slotsNode) slotsNode.innerHTML = saved.map((item, index) => {
+          const slot = index + 1;
+          const name = item ? item.name : 'Empty';
+          const checked = item && (index === 0 || !saved[0]) ? ' checked' : '';
+          return `<label class="workbook-slot"><input type="radio" name="saved_workbook_slot" value="${slot}"${checked}${item ? '' : ' disabled'}><span><strong>Saved Excel ${slot}</strong><span class="workbook-slot-name">${escapeHtml(name)}</span></span></label>`;
+        }).join('');
       } catch (_) { node.textContent = 'This browser could not access saved file storage.'; }
+    }
+    function escapeHtml(value) {
+      const node = document.createElement('div');
+      node.textContent = value || '';
+      return node.innerHTML;
     }
     const analyzeForm = document.getElementById('analyzeForm');
     if (analyzeForm) analyzeForm.addEventListener('submit', async event => {
@@ -731,10 +771,11 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
       try {
         if (selected && document.getElementById('saveWorkbook').checked) await storeWorkbook(selected);
         if (!workbook) {
-          const saved = await savedWorkbook();
+          const slot = document.querySelector('input[name="saved_workbook_slot"]:checked');
+          const saved = slot ? await getWorkbook(`employee-contacts-${slot.value}`) : null;
           if (saved) workbook = new File([saved.blob], saved.name, {type:saved.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
         }
-        if (!workbook) throw new Error('Select the employee Excel workbook once. It can then be reused automatically.');
+        if (!workbook) throw new Error('Upload an employee Excel workbook or choose one of the saved Excel slots.');
         status.textContent = 'Analyzing files...';
         const data = new FormData(analyzeForm);
         data.set('xlsx_file', workbook, workbook.name);
@@ -744,7 +785,10 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
       } catch (error) { status.textContent = error.message; status.className = 'status-bad small'; }
     });
     const clearButton = document.getElementById('clearSavedWorkbook');
-    if (clearButton) clearButton.addEventListener('click', async () => { await removeWorkbook(); await refreshWorkbookStatus(); });
+    if (clearButton) clearButton.addEventListener('click', async () => {
+      if (!confirm('Remove both saved employee workbooks from this browser?')) return;
+      await removeWorkbooks(); await refreshWorkbookStatus();
+    });
     document.querySelectorAll('.sms-send-form').forEach(form => form.addEventListener('submit', async event => {
       event.preventDefault();
       if (form.dataset.bulk === 'true' && !document.getElementById('selectedRecipientKeys').value) {
