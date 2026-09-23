@@ -32,7 +32,7 @@ MAINTENANCE_COOKIE = "sos_maintenance_access"
 
 
 def maintenance_enabled() -> bool:
-    return os.environ.get("MAINTENANCE_MODE", "false").strip().casefold() in {
+    return os.environ.get("MAINTENANCE_MODE", "true").strip().casefold() in {
         "1", "true", "yes", "on"
     }
 
