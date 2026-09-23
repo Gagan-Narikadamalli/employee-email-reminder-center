@@ -21,17 +21,80 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, redirect, request
 
 app = Flask(__name__)
 
 # Only the SHA-256 digest is stored in this public repository. The password
 # itself is never shipped to the browser or committed to source control.
 ADMIN_PASSWORD_SHA256 = "17bd4b37413a0867e5d165476be2edd0e94b61b5eafb9217057e01a04a9a0f51"
+MAINTENANCE_COOKIE = "sos_maintenance_access"
+
+
+def maintenance_enabled() -> bool:
+    return os.environ.get("MAINTENANCE_MODE", "false").strip().casefold() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def maintenance_access_token() -> str:
+    return hmac.new(
+        ADMIN_PASSWORD_SHA256.encode("utf-8"),
+        b"employee-reminder-maintenance-access",
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def has_maintenance_access() -> bool:
+    supplied = request.cookies.get(MAINTENANCE_COOKIE, "")
+    return bool(supplied) and hmac.compare_digest(supplied, maintenance_access_token())
+
+
+def maintenance_page(error: str = "") -> str:
+    error_html = (
+        f"<div class='maintenance-error'>{html.escape(error)}</div>" if error else ""
+    )
+    return f"""<!doctype html><html lang='en'><head><meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width,initial-scale=1'>
+    <title>Employee Reminder Center | Maintenance</title><style>
+    :root{{--blue:#164b8f;--light:#f4f8fc;--ink:#17223b;--muted:#667085;}}
+    *{{box-sizing:border-box}} body{{margin:0;min-height:100vh;display:grid;place-items:center;
+    padding:24px;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--light);color:var(--ink)}}
+    body:before{{content:'';position:fixed;inset:0 0 auto;height:8px;background:linear-gradient(90deg,#1b75bb 0 25%,#f4c542 25% 50%,#e54b4b 50% 75%,#36a269 75%)}}
+    .panel{{width:min(620px,100%);background:#fff;border:1px solid #d9e2f0;border-radius:20px;padding:32px;
+    box-shadow:0 14px 38px rgba(18,54,92,.12);text-align:center}}
+    .mark{{width:68px;height:68px;margin:0 auto 18px;border-radius:20px;display:grid;place-items:center;
+    color:#fff;font-size:27px;font-weight:900;background:linear-gradient(135deg,#1b75bb,#6346b8)}}
+    h1{{margin:0 0 10px;font-size:30px}} p{{line-height:1.55;color:var(--muted)}}
+    details{{margin-top:24px;text-align:left;border-top:1px solid #e4e7ec;padding-top:18px}}
+    summary{{cursor:pointer;font-weight:750;color:var(--blue)}} label{{display:block;font-weight:700;margin:14px 0 6px}}
+    input{{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:9px;font:inherit}}
+    button{{margin-top:12px;width:100%;padding:11px;border:0;border-radius:9px;background:var(--blue);color:#fff;font-weight:800;cursor:pointer}}
+    .maintenance-error{{margin-top:12px;padding:10px;border-radius:8px;background:#fef3f2;color:#b42318;font-weight:700}}
+    </style></head><body><main class='panel'><div class='mark'>SOS</div>
+    <h1>We’ll be back soon</h1><p>The Employee Reminder Center is currently under maintenance.
+    Email and SMS reminder tools are temporarily unavailable while updates are completed.</p>
+    <details><summary>Administrator access</summary>{error_html}
+    <form method='post' action='/maintenance-access'><label for='maintenance-password'>Admin password</label>
+    <input id='maintenance-password' name='password' type='password' autocomplete='current-password' required>
+    <button type='submit'>Enter maintenance preview</button></form></details>
+    </main></body></html>"""
 
 
 @app.before_request
 def require_admin_password():
+    if request.endpoint == "maintenance_access":
+        return None
+
+    if maintenance_enabled():
+        if has_maintenance_access():
+            return None
+        return Response(
+            maintenance_page(),
+            503,
+            {"Cache-Control": "no-store, no-cache, must-revalidate, private"},
+        )
+
     auth = request.authorization
     supplied_password = auth.password if auth else ""
     supplied_digest = hashlib.sha256(supplied_password.encode("utf-8")).hexdigest()
@@ -45,6 +108,28 @@ def require_admin_password():
                 "Cache-Control": "no-store, no-cache, must-revalidate, private",
             },
         )
+
+
+@app.post("/maintenance-access")
+def maintenance_access():
+    if not maintenance_enabled():
+        return redirect("/")
+
+    supplied_password = request.form.get("password", "")
+    supplied_digest = hashlib.sha256(supplied_password.encode("utf-8")).hexdigest()
+    if not hmac.compare_digest(supplied_digest, ADMIN_PASSWORD_SHA256):
+        return Response(maintenance_page("Incorrect administrator password."), 401)
+
+    response = redirect("/")
+    response.set_cookie(
+        MAINTENANCE_COOKIE,
+        maintenance_access_token(),
+        max_age=8 * 60 * 60,
+        secure=request.is_secure or bool(os.environ.get("VERCEL")),
+        httponly=True,
+        samesite="Lax",
+    )
+    return response
 
 
 @app.after_request
