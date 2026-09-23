@@ -59,15 +59,18 @@ PORT = 5051
 ANALYSES: dict[str, dict] = {}
 
 CSS = """
-:root { --ink:#182230; --muted:#667085; --line:#e4e7ec; --bg:#f7f8fa; --card:#ffffff; --ok:#067647; --warn:#b54708; --bad:#b42318; --primary:#175cd3; --gmail:#c5221f; }
+:root { --ink:#17223b; --muted:#667085; --line:#d9e2f0; --bg:#f4f8fc; --card:#ffffff; --ok:#087f5b; --warn:#b54708; --bad:#b42318; --primary:#164b8f; --primary-dark:#103865; --sos-blue:#1b75bb; --sos-yellow:#f4c542; --sos-red:#e54b4b; --sos-green:#36a269; --gmail:#c5221f; }
 * { box-sizing:border-box; }
 body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
-main { max-width:1050px; margin:0 auto; padding:30px 18px 60px; }
+body:before { content:""; display:block; height:8px; background:linear-gradient(90deg,var(--sos-blue) 0 25%,var(--sos-yellow) 25% 50%,var(--sos-red) 50% 75%,var(--sos-green) 75%); }
+main { max-width:1120px; margin:0 auto; padding:26px 18px 60px; }
 h1 { margin:0; font-size:30px; } h2 { margin:0 0 10px; font-size:20px; }
 p { line-height:1.5; }
-.topline { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap; margin-bottom:18px; }
-.badge-email { display:inline-block; background:#ecfdf3; color:#067647; border:1px solid #abefc6; border-radius:999px; padding:5px 10px; font-size:12px; font-weight:800; letter-spacing:.02em; }
-.card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin:14px 0; }
+.topline { display:flex; justify-content:space-between; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:18px; }
+.brand { display:flex; align-items:center; gap:14px; }
+.brand-mark { width:58px; height:58px; border-radius:18px; display:grid; place-items:center; color:#fff; font-size:25px; font-weight:900; background:linear-gradient(135deg,var(--sos-blue),#6346b8); box-shadow:0 8px 20px rgba(22,75,143,.22); }
+.badge-email { display:inline-block; background:#eaf4ff; color:var(--primary); border:1px solid #b9d8f5; border-radius:999px; padding:5px 10px; font-size:12px; font-weight:800; letter-spacing:.02em; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:19px; margin:14px 0; box-shadow:0 5px 18px rgba(18,54,92,.055); }
 .muted { color:var(--muted); } .small { font-size:13px; }
 .status-ok { color:var(--ok); font-weight:750; } .status-warn { color:var(--warn); font-weight:750; } .status-bad { color:var(--bad); font-weight:750; }
 .upload { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
@@ -78,12 +81,12 @@ input[type=file], input[type=text], textarea { width:100%; border:1px solid #d0d
 input[type=checkbox] { width:17px; height:17px; margin:0; }
 button, .button { border:0; border-radius:9px; padding:10px 15px; font-weight:750; cursor:pointer; font-size:14px; text-decoration:none; display:inline-block; }
 button:disabled { cursor:not-allowed; opacity:.6; }
-.primary { background:var(--primary); color:#fff; } .gmail { background:var(--gmail); color:#fff; } .secondary { background:#eef2f6; color:#344054; }
+.primary { background:var(--primary); color:#fff; } .primary:hover { background:var(--primary-dark); } .gmail { background:var(--gmail); color:#fff; } .secondary { background:#eaf0f7; color:#344054; }
 .sms { background:#067647; color:#fff; }
 .sms-panel { border-left:4px solid #12b76a; background:#f0fdf4; padding:12px 14px; border-radius:8px; margin:12px 0; }
 .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; align-items:center; }
 .metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:18px 0; }
-.metric { background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px; }
+.metric { background:#fff; border:1px solid var(--line); border-top:4px solid var(--sos-blue); border-radius:12px; padding:14px; }
 .metric strong { display:block; font-size:25px; margin-top:3px; }
 .success { border-left:4px solid #12b76a; background:#ecfdf3; padding:12px 14px; border-radius:8px; margin:12px 0; }
 .error, .notice { border-left:4px solid #f04438; background:#fef3f2; padding:12px 14px; border-radius:8px; margin:12px 0; }
@@ -93,6 +96,11 @@ th,td { border-bottom:1px solid var(--line); padding:9px 8px; text-align:left; }
 .email-box { border:1px solid var(--line); border-radius:11px; padding:12px; background:#fafafa; margin-top:12px; }
 .inline-form { display:inline; }
 summary { cursor:pointer; font-weight:700; color:#475467; }
+.selection-bar { position:sticky; top:10px; z-index:5; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; background:#fff; border:2px solid #b9d8f5; border-radius:15px; padding:13px 15px; margin:16px 0; box-shadow:0 9px 24px rgba(22,75,143,.14); }
+.recipient-select { display:flex; align-items:flex-start; gap:10px; }
+.recipient-select input { margin-top:4px; flex:0 0 auto; }
+.selected-card { border-color:var(--sos-blue); box-shadow:0 7px 22px rgba(27,117,187,.14); }
+.channel-actions { display:flex; gap:8px; flex-wrap:wrap; }
 @media (max-width:760px) { .upload,.metrics { grid-template-columns:1fr; } }
 """
 
@@ -465,9 +473,9 @@ def send_twilio_sms(to_phone: str, body: str) -> str:
 
 
 def page(result: dict | None = None, error: str | None = None, notice: str | None = None) -> str:
-    parts = [f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Employee Reminder Center</title><style>{CSS}</style></head><body><main>
-    <div class='topline'><div><span class='badge-email'>EMAIL + SMS</span><h1 style='margin-top:8px'>Employee Reminder Center</h1>
-    <p class='muted' style='margin:7px 0 0'>Analyze the appointment CSV by employee name, then use the current email address and phone number from the uploaded Employee Contact Info workbook.</p></div></div>
+    parts = [f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Employee Reminder Center | SOS</title><style>{CSS}</style></head><body><main>
+    <div class='topline'><div class='brand'><div class='brand-mark' aria-hidden='true'>SOS</div><div><span class='badge-email'>SUCCESS ON THE SPECTRUM</span><h1 style='margin-top:8px'>Employee Reminder Center</h1>
+    <p class='muted' style='margin:7px 0 0'>Review outstanding documentation and send personalized email or SMS reminders.</p></div></div></div>
     <div class='info'><strong>Contacts come directly from the uploaded Excel workbook.</strong> Email opens a prepared Gmail draft. SMS sends through Twilio after confirmation. The existing employee matching and recipient workflow remains unchanged.</div>
     <div class='card'><h2>Analyze employee reminders</h2><form id='analyzeForm' method='post' action='/analyze' enctype='multipart/form-data'><div class='upload'>
       <div><label>Unfiltered appointments CSV</label><input type='file' name='csv_file' accept='.csv' required><div class='muted small' style='margin-top:6px'>Converted, cancelled, deleted, and non-convertible rows are removed automatically.</div></div>
@@ -486,10 +494,10 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
     if result:
         eligible = [e for e in result['employees'] if e.get('contact_email') and e.get('contact_found')]
         sms_candidates = [e for e in result['employees'] if e.get('contact_phone') and e.get('contact_found')]
-        bulk_data = [{"name": e["name"], "phone": e["contact_phone"], "message": e["message"]} for e in sms_candidates]
+        bulk_data = [{"key": e["key"], "name": e["name"], "phone": e["contact_phone"], "message": e["message"]} for e in sms_candidates]
         bulk_payload, bulk_signature = signed_payload({"recipients": bulk_data})
         if eligible:
-            bulk_action = f"<button class='gmail' type='button' onclick='openAllGmailDrafts()'>Open All in Gmail ({len(eligible)})</button>"
+            bulk_action = f"<button id='sendSelectedEmail' class='gmail' type='button' onclick='openSelectedGmailDrafts()'>Email selected (0)</button>"
         else:
             bulk_action = "<button class='secondary' type='button' disabled>Open All in Gmail</button>"
         parts.append(f"""
@@ -498,20 +506,21 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
           <div class='metric'><span class='muted'>Employees</span><strong>{result['employee_count']}</strong></div>
           <div class='metric'><span class='muted'>Ready to email / SMS</span><strong>{len(eligible)} / {len(sms_candidates)}</strong></div>
         </div>
-        <div class='card'>
-          <div class='employee-head'><div><h2>Email everyone</h2><div class='muted'>{len(eligible)} matched employee{'s' if len(eligible) != 1 else ''} ready.</div>
-          <div class='muted small'>Open All creates one personalized Gmail compose tab per employee. Your browser may ask you to allow pop-ups.</div></div>{bulk_action}</div>
+        <div class='selection-bar'>
+          <div><strong><span id='selectedCount'>0</span> people selected</strong><div class='muted small'>Choose everyone or only the employees you want to contact.</div></div>
+          <div class='channel-actions'><button class='secondary' type='button' onclick='selectAllRecipients()'>Select all</button><button class='secondary' type='button' onclick='clearAllRecipients()'>Clear all</button>{bulk_action}</div>
         </div>
         <div class='card'>
           <div class='employee-head'><div><h2>Text eligible employees</h2>
           <div class='muted'>{len(sms_candidates)} matched employee{'s' if len(sms_candidates) != 1 else ''} have a valid phone number from the uploaded workbook.</div>
           <div class='muted small'>No message is sent until you confirm. Rows without a valid phone number are skipped.</div></div></div>
-          <form class='sms-send-form' method='post' action='/send-sms' data-confirm='Send this SMS to every listed employee with a valid phone number?'>
+          <form id='bulkSmsForm' class='sms-send-form' method='post' action='/send-sms' data-bulk='true' data-confirm='Send an SMS to the selected employees who have a valid phone number?'>
             <input type='hidden' name='payload' value='{esc(bulk_payload)}'><input type='hidden' name='signature' value='{esc(bulk_signature)}'>
+            <input id='selectedRecipientKeys' type='hidden' name='selected_keys' value=''>
             <div class='connect-row' style='margin-top:14px'><input id='automaticMessage' type='radio' name='message_mode' value='automatic' checked><label for='automaticMessage' style='margin:0'>Automated missing-documentation reminder</label></div>
             <div class='connect-row' style='margin-top:8px'><input id='customMessageMode' type='radio' name='message_mode' value='custom'><label for='customMessageMode' style='margin:0'>Custom one-time message</label></div>
             <div id='customMessageFields' style='margin-top:12px'><label for='customMessage'>Custom message</label><textarea id='customMessage' name='custom_message' rows='4' maxlength='1000' placeholder='Example: Today is a holiday. The center will reopen tomorrow.'></textarea><div class='muted small'>This text is sent only when “Custom one-time message” is selected. <span id='customCount'>0</span>/1000 characters.</div></div>
-            <div class='actions'><button class='sms' type='submit' {'disabled' if not sms_candidates or not sms_configured() else ''}>Send SMS to eligible employees ({len(sms_candidates)})</button></div><div class='sms-result small' aria-live='polite'></div>
+            <div class='actions'><button id='sendSelectedSms' class='sms' type='submit' data-configured='{'true' if sms_configured() else 'false'}' {'disabled' if not sms_candidates or not sms_configured() else ''}>SMS selected (0)</button></div><div class='sms-result small' aria-live='polite'></div>
           </form>
         </div>
         <h2 style='margin-top:26px'>Individual reminders</h2>
@@ -535,9 +544,9 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
                 <button class='sms' type='submit'>Send SMS</button><div class='sms-result small' aria-live='polite'></div></form>"""
 
             parts.append(f"""
-            <section class='card'>
+            <section class='card recipient-card' data-recipient-key='{esc(emp['key'])}'>
               <div class='employee-head'>
-                <div><div style='font-size:19px;font-weight:800'>{esc(emp['name'])}</div><div class='muted'>{esc(emp['contact_email']) or 'No matched email'}</div><div class='muted small'>{esc(emp['match_note'])}</div></div>
+                <div class='recipient-select'><input class='recipient-checkbox' type='checkbox' value='{esc(emp['key'])}' data-email-url='{esc(emp['email_url'] or '')}' data-has-phone='{'true' if emp.get('contact_phone') and emp.get('contact_found') else 'false'}' aria-label='Select {esc(emp['name'])}'><div><div style='font-size:19px;font-weight:800'>{esc(emp['name'])}</div><div class='muted'>{esc(emp['contact_email']) or 'No matched email'}</div><div class='muted small'>{esc(emp['match_note'])}</div></div></div>
                 <div style='text-align:right'><strong>{emp['count']}</strong> missing appointment{'s' if emp['count'] != 1 else ''}<br>{status}</div>
               </div>
               <table><thead><tr><th>Date</th><th>Time</th></tr></thead><tbody>{rows}</tbody></table>
@@ -552,17 +561,35 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
 
         parts.append("""
         <script>
-        function openAllGmailDrafts() {
-          const links = Array.from(document.querySelectorAll('a.gmail-draft-link'));
-          if (!links.length) return;
-          if (!confirm(`Open ${links.length} personalized Gmail compose tabs? You will still click Send in Gmail for each message.`)) return;
+        function selectedRecipientBoxes() { return Array.from(document.querySelectorAll('.recipient-checkbox:checked')); }
+        function updateRecipientSelection() {
+          const selected = selectedRecipientBoxes();
+          document.getElementById('selectedCount').textContent = selected.length;
+          document.querySelectorAll('.recipient-card').forEach(card => card.classList.toggle('selected-card', card.querySelector('.recipient-checkbox').checked));
+          const emailCount = selected.filter(box => box.dataset.emailUrl).length;
+          const smsCount = selected.filter(box => box.dataset.hasPhone === 'true').length;
+          const emailButton = document.getElementById('sendSelectedEmail');
+          if (emailButton) { emailButton.textContent = `Email selected (${emailCount})`; emailButton.disabled = emailCount === 0; }
+          const smsButton = document.getElementById('sendSelectedSms');
+          if (smsButton) { smsButton.textContent = `SMS selected (${smsCount})`; smsButton.disabled = smsCount === 0 || smsButton.dataset.configured === 'false'; }
+          const selectedKeys = document.getElementById('selectedRecipientKeys');
+          if (selectedKeys) selectedKeys.value = selected.map(box => box.value).join(',');
+        }
+        function selectAllRecipients() { document.querySelectorAll('.recipient-checkbox').forEach(box => box.checked = true); updateRecipientSelection(); }
+        function clearAllRecipients() { document.querySelectorAll('.recipient-checkbox').forEach(box => box.checked = false); updateRecipientSelection(); }
+        function openSelectedGmailDrafts() {
+          const boxes = selectedRecipientBoxes().filter(box => box.dataset.emailUrl);
+          if (!boxes.length) { alert('Select at least one employee with a valid email address.'); return; }
+          if (!confirm(`Open ${boxes.length} personalized Gmail compose tab${boxes.length === 1 ? '' : 's'}? You will still click Send in Gmail for each message.`)) return;
           let blocked = 0;
-          for (const link of links) {
-            const w = window.open(link.href, '_blank');
+          for (const box of boxes) {
+            const w = window.open(box.dataset.emailUrl, '_blank');
             if (!w) blocked += 1;
           }
           if (blocked) alert('Your browser blocked one or more Gmail tabs. Allow pop-ups, then try again.');
         }
+        document.querySelectorAll('.recipient-checkbox').forEach(box => box.addEventListener('change', updateRecipientSelection));
+        updateRecipientSelection();
         </script>
         """)
 
@@ -635,6 +662,12 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
     if (clearButton) clearButton.addEventListener('click', async () => { await removeWorkbook(); await refreshWorkbookStatus(); });
     document.querySelectorAll('.sms-send-form').forEach(form => form.addEventListener('submit', async event => {
       event.preventDefault();
+      if (form.dataset.bulk === 'true' && !document.getElementById('selectedRecipientKeys').value) {
+        const result = form.querySelector('.sms-result');
+        result.textContent = 'Select at least one employee before sending.';
+        result.className = 'sms-result status-bad small';
+        return;
+      }
       if (!confirm(form.dataset.confirm || 'Send this SMS now?')) return;
       const button = form.querySelector('button[type=submit]');
       const result = form.querySelector('.sms-result');
@@ -748,6 +781,14 @@ def flask_send_sms():
         return (jsonify({"ok": False, "error": message}), 503) if wants_json else (page(error=message), 503)
     try:
         data = read_signed_payload(request.form.get("payload", ""), request.form.get("signature", ""))
+        selected_keys = {
+            key.strip() for key in request.form.get("selected_keys", "").split(",") if key.strip()
+        }
+        recipients = data.get("recipients", [])
+        if selected_keys:
+            recipients = [recipient for recipient in recipients if str(recipient.get("key") or "") in selected_keys]
+        elif request.form.get("selected_keys") is not None:
+            raise ValueError("Select at least one employee before sending.")
         mode = request.form.get("message_mode", "automatic")
         custom_message = request.form.get("custom_message", "").strip()
         if mode not in {"automatic", "custom"}:
@@ -759,7 +800,7 @@ def flask_send_sms():
         sent = 0
         skipped = 0
         failed = 0
-        for recipient in data.get("recipients", []):
+        for recipient in recipients:
             phone = normalize_phone(recipient.get("phone"))
             message = custom_message if mode == "custom" else str(recipient.get("message") or "").strip()
             if not phone:
