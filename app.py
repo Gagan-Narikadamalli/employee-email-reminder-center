@@ -571,7 +571,8 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
       <div id='savedWorkbookSlots' class='workbook-slots' aria-label='Saved employee workbooks'></div></div>
     </div>
     <div class='connect-row' style='margin-top:12px'><input id='saveWorkbook' type='checkbox'><label for='saveWorkbook' style='margin:0'>Save this employee workbook in this browser</label></div>
-    <div class='muted small' style='margin-top:5px'>Saving is off until you select it. The newest saved workbook becomes Slot 1 and the previous workbook moves to Slot 2.</div>
+    <div id='saveTargetPanel' hidden style='margin-top:10px'><strong>Choose which saved Excel workbook to replace</strong><div id='saveTargetSlots' class='workbook-slots'></div></div>
+    <div class='muted small' style='margin-top:5px'>Saving is off until selected. When saving, choose Slot 1 or Slot 2 so the other location’s workbook stays unchanged.</div>
     <div class='actions'><button class='primary' type='submit'>Analyze Files</button><button id='clearSavedWorkbook' class='secondary' type='button'>Remove both saved workbooks</button></div>
     <div id='analyzeStatus' class='muted small' style='margin-top:8px'></div></form></div>"""]
 
@@ -718,15 +719,11 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
       }
       return [slot1, slot2];
     }
-    async function storeWorkbook(file) {
-      const current = await getWorkbook('employee-contacts-1');
+    async function storeWorkbook(file, slot) {
       const db = await openWorkbookDb();
       return new Promise((resolve, reject) => {
         const tx = db.transaction(workbookStore, 'readwrite');
-        const store = tx.objectStore(workbookStore);
-        if (current) store.put({...current, id:'employee-contacts-2'});
-        else store.delete('employee-contacts-2');
-        store.put({id:'employee-contacts-1', name:file.name, type:file.type, blob:file, savedAt:Date.now()});
+        tx.objectStore(workbookStore).put({id:`employee-contacts-${slot}`, name:file.name, type:file.type, blob:file, savedAt:Date.now()});
         tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
       });
     }
@@ -744,6 +741,7 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
     async function refreshWorkbookStatus() {
       const node = document.getElementById('savedWorkbookStatus');
       const slotsNode = document.getElementById('savedWorkbookSlots');
+      const saveTargetSlots = document.getElementById('saveTargetSlots');
       if (!node) return;
       try {
         const saved = await savedWorkbooks();
@@ -752,8 +750,12 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
         if (slotsNode) slotsNode.innerHTML = saved.map((item, index) => {
           const slot = index + 1;
           const name = item ? item.name : 'Empty';
-          const checked = item && (index === 0 || !saved[0]) ? ' checked' : '';
-          return `<label class="workbook-slot"><input type="radio" name="saved_workbook_slot" value="${slot}"${checked}${item ? '' : ' disabled'}><span><strong>Saved Excel ${slot}</strong><span class="workbook-slot-name">${escapeHtml(name)}</span></span></label>`;
+          return `<label class="workbook-slot"><input type="radio" name="saved_workbook_slot" value="${slot}"${item ? '' : ' disabled'}><span><strong>Analyze with Saved Excel ${slot}</strong><span class="workbook-slot-name">${escapeHtml(name)}</span></span></label>`;
+        }).join('');
+        if (saveTargetSlots) saveTargetSlots.innerHTML = saved.map((item, index) => {
+          const slot = index + 1;
+          const name = item ? item.name : 'Empty slot';
+          return `<label class="workbook-slot"><input type="radio" name="save_workbook_slot" value="${slot}"><span><strong>Replace Saved Excel ${slot}</strong><span class="workbook-slot-name">${escapeHtml(name)}</span></span></label>`;
         }).join('');
       } catch (_) { node.textContent = 'This browser could not access saved file storage.'; }
     }
@@ -763,19 +765,31 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
       return node.innerHTML;
     }
     const analyzeForm = document.getElementById('analyzeForm');
+    const saveWorkbookCheckbox = document.getElementById('saveWorkbook');
+    if (saveWorkbookCheckbox) saveWorkbookCheckbox.addEventListener('change', () => {
+      document.getElementById('saveTargetPanel').hidden = !saveWorkbookCheckbox.checked;
+      if (!saveWorkbookCheckbox.checked) document.querySelectorAll('input[name="save_workbook_slot"]').forEach(input => input.checked = false);
+    });
     if (analyzeForm) analyzeForm.addEventListener('submit', async event => {
       event.preventDefault();
       const status = document.getElementById('analyzeStatus');
       const selected = document.getElementById('xlsxFile').files[0];
       let workbook = selected;
       try {
-        if (selected && document.getElementById('saveWorkbook').checked) await storeWorkbook(selected);
+        if (saveWorkbookCheckbox.checked) {
+          if (!selected) throw new Error('Choose a new employee Excel workbook before selecting Save. To use an existing workbook, leave Save unchecked and choose an Analyze slot.');
+          const target = document.querySelector('input[name="save_workbook_slot"]:checked');
+          if (!target) throw new Error('Choose Saved Excel 1 or Saved Excel 2 to replace.');
+          const current = await getWorkbook(`employee-contacts-${target.value}`);
+          if (current && !confirm(`Replace “${current.name}” in Saved Excel ${target.value} with “${selected.name}”?`)) return;
+          await storeWorkbook(selected, target.value);
+        }
         if (!workbook) {
           const slot = document.querySelector('input[name="saved_workbook_slot"]:checked');
           const saved = slot ? await getWorkbook(`employee-contacts-${slot.value}`) : null;
           if (saved) workbook = new File([saved.blob], saved.name, {type:saved.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
         }
-        if (!workbook) throw new Error('Upload an employee Excel workbook or choose one of the saved Excel slots.');
+        if (!workbook) throw new Error('Choose Saved Excel 1 or Saved Excel 2 to analyze, or upload a new employee Excel workbook.');
         status.textContent = 'Analyzing files...';
         const data = new FormData(analyzeForm);
         data.set('xlsx_file', workbook, workbook.name);
