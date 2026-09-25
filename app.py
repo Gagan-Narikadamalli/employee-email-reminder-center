@@ -687,13 +687,22 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
     <script>
     const workbookDbName = 'employee-reminder-center';
     const workbookStore = 'saved-files';
+    const workbookStatusCacheKey = 'employee-reminder-saved-workbooks';
+    let workbookDbPromise = null;
     function openWorkbookDb() {
-      return new Promise((resolve, reject) => {
+      if (workbookDbPromise) return workbookDbPromise;
+      workbookDbPromise = new Promise((resolve, reject) => {
         const req = indexedDB.open(workbookDbName, 1);
         req.onupgradeneeded = () => req.result.createObjectStore(workbookStore, {keyPath:'id'});
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const db = req.result;
+          db.onversionchange = () => { db.close(); workbookDbPromise = null; };
+          resolve(db);
+        };
+        req.onerror = () => { workbookDbPromise = null; reject(req.error); };
+        req.onblocked = () => { workbookDbPromise = null; reject(new Error('Saved workbook storage is temporarily busy.')); };
       });
+      return workbookDbPromise;
     }
     async function getWorkbook(id) {
       const db = await openWorkbookDb();
@@ -704,9 +713,19 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
       });
     }
     async function savedWorkbooks() {
-      const [slot1, slot2, legacy] = await Promise.all([
-        getWorkbook('employee-contacts-1'), getWorkbook('employee-contacts-2'), getWorkbook('employee-contacts')
-      ]);
+      const db = await openWorkbookDb();
+      const [slot1, slot2, legacy] = await new Promise((resolve, reject) => {
+        const tx = db.transaction(workbookStore);
+        const store = tx.objectStore(workbookStore);
+        const requests = [
+          store.get('employee-contacts-1'),
+          store.get('employee-contacts-2'),
+          store.get('employee-contacts')
+        ];
+        tx.oncomplete = () => resolve(requests.map(req => req.result || null));
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Could not read saved workbooks.'));
+      });
       if (!slot1 && legacy) {
         const db = await openWorkbookDb();
         await new Promise((resolve, reject) => {
@@ -738,26 +757,34 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
         tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
       });
     }
-    async function refreshWorkbookStatus() {
+    function renderWorkbookStatus(saved) {
       const node = document.getElementById('savedWorkbookStatus');
       const slotsNode = document.getElementById('savedWorkbookSlots');
       const saveTargetSlots = document.getElementById('saveTargetSlots');
       if (!node) return;
+      const count = saved.filter(Boolean).length;
+      node.textContent = count ? `${count} saved workbook${count === 1 ? '' : 's'} available. Choose a slot or upload a new Excel file.` : 'No workbook is saved. Upload one, then select “Save” if you want to keep it.';
+      if (slotsNode) slotsNode.innerHTML = saved.map((item, index) => {
+        const slot = index + 1;
+        const name = item ? item.name : 'Empty';
+        return `<label class="workbook-slot"><input type="radio" name="saved_workbook_slot" value="${slot}"${item ? '' : ' disabled'}><span><strong>Analyze with Saved Excel ${slot}</strong><span class="workbook-slot-name">${escapeHtml(name)}</span></span></label>`;
+      }).join('');
+      if (saveTargetSlots) saveTargetSlots.innerHTML = saved.map((item, index) => {
+        const slot = index + 1;
+        const name = item ? item.name : 'Empty slot';
+        return `<label class="workbook-slot"><input type="radio" name="save_workbook_slot" value="${slot}"><span><strong>Replace Saved Excel ${slot}</strong><span class="workbook-slot-name">${escapeHtml(name)}</span></span></label>`;
+      }).join('');
+    }
+    async function refreshWorkbookStatus() {
+      const node = document.getElementById('savedWorkbookStatus');
+      if (!node) return;
       try {
         const saved = await savedWorkbooks();
-        const count = saved.filter(Boolean).length;
-        node.textContent = count ? `${count} saved workbook${count === 1 ? '' : 's'} available. Choose a slot or upload a new Excel file.` : 'No workbook is saved. Upload one, then select “Save” if you want to keep it.';
-        if (slotsNode) slotsNode.innerHTML = saved.map((item, index) => {
-          const slot = index + 1;
-          const name = item ? item.name : 'Empty';
-          return `<label class="workbook-slot"><input type="radio" name="saved_workbook_slot" value="${slot}"${item ? '' : ' disabled'}><span><strong>Analyze with Saved Excel ${slot}</strong><span class="workbook-slot-name">${escapeHtml(name)}</span></span></label>`;
-        }).join('');
-        if (saveTargetSlots) saveTargetSlots.innerHTML = saved.map((item, index) => {
-          const slot = index + 1;
-          const name = item ? item.name : 'Empty slot';
-          return `<label class="workbook-slot"><input type="radio" name="save_workbook_slot" value="${slot}"><span><strong>Replace Saved Excel ${slot}</strong><span class="workbook-slot-name">${escapeHtml(name)}</span></span></label>`;
-        }).join('');
-      } catch (_) { node.textContent = 'This browser could not access saved file storage.'; }
+        renderWorkbookStatus(saved);
+        sessionStorage.setItem(workbookStatusCacheKey, JSON.stringify(saved.map(item => item ? {name:item.name} : null)));
+      } catch (_) {
+        if (!document.querySelector('input[name="saved_workbook_slot"]')) node.textContent = 'This browser could not access saved file storage.';
+      }
     }
     function escapeHtml(value) {
       const node = document.createElement('div');
@@ -783,6 +810,7 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
           const current = await getWorkbook(`employee-contacts-${target.value}`);
           if (current && !confirm(`Replace “${current.name}” in Saved Excel ${target.value} with “${selected.name}”?`)) return;
           await storeWorkbook(selected, target.value);
+          await refreshWorkbookStatus();
         }
         if (!workbook) {
           const slot = document.querySelector('input[name="saved_workbook_slot"]:checked');
@@ -825,6 +853,10 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
     }));
     const customMessage = document.getElementById('customMessage');
     if (customMessage) customMessage.addEventListener('input', () => { document.getElementById('customCount').textContent = customMessage.value.length; });
+    try {
+      const cachedWorkbooks = JSON.parse(sessionStorage.getItem(workbookStatusCacheKey) || 'null');
+      if (Array.isArray(cachedWorkbooks) && cachedWorkbooks.length === 2) renderWorkbookStatus(cachedWorkbooks);
+    } catch (_) {}
     refreshWorkbookStatus();
     </script></main></body></html>""")
     return "".join(parts)
