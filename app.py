@@ -472,7 +472,7 @@ def analyze_files(csv_bytes: bytes, xlsx_bytes: bytes) -> dict:
         conversion_word = "conversion" if count == 1 else "conversions"
         message = (
             f"Hi {first}, this is a reminder that you currently have {count} {appointment_word} "
-            f"that still {verb} to be converted. Please check the scheduling/timesheet system "
+            f"that still {verb} to be converted. Please check Central Reach "
             f"and complete the missing {conversion_word}. Thank you."
         )
         subject = f"Reminder: {count} missing appointment conversion{'s' if count != 1 else ''}"
