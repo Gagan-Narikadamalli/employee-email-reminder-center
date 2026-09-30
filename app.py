@@ -138,7 +138,7 @@ def dashboard_access():
 
 @app.before_request
 def require_admin_password():
-    if request.endpoint == "maintenance_access":
+    if request.endpoint in {"maintenance_access", "dashboard_access"}:
         return None
 
     if maintenance_enabled():
