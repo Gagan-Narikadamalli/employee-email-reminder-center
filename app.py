@@ -94,19 +94,9 @@ def require_admin_password():
             {"Cache-Control": "no-store, no-cache, must-revalidate, private"},
         )
 
-    auth = request.authorization
-    supplied_password = auth.password if auth else ""
-    supplied_digest = hashlib.sha256(supplied_password.encode("utf-8")).hexdigest()
-
-    if not hmac.compare_digest(supplied_digest, ADMIN_PASSWORD_SHA256):
-        return Response(
-            "Employee Reminder Center authentication required.",
-            401,
-            {
-                "WWW-Authenticate": 'Basic realm="Employee Reminder Center", charset="UTF-8"',
-                "Cache-Control": "no-store, no-cache, must-revalidate, private",
-            },
-        )
+    # Authentication is handled by the SOS Apps Dashboard before redirecting
+    # staff here. Avoid a second browser Basic Auth prompt.
+    return None
 
 
 @app.post("/maintenance-access")
