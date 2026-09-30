@@ -14,7 +14,7 @@ import urllib.request
 import uuid
 import webbrowser
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,7 +28,9 @@ app = Flask(__name__)
 # Only the SHA-256 digest is stored in this public repository. The password
 # itself is never shipped to the browser or committed to source control.
 ADMIN_PASSWORD_SHA256 = "17bd4b37413a0867e5d165476be2edd0e94b61b5eafb9217057e01a04a9a0f51"
-MAINTENANCE_COOKIE = "sos_maintenance_access"
+MAINTENANCE_COOKIE = "sos_maintenance_access"\nDASHBOARD_ACCESS_COOKIE = "sos_dashboard_access"
+DASHBOARD_ACCESS_SECONDS = 8 * 60 * 60
+DASHBOARD_SIGNING_KEY = "389759402a476c2c751911a1ab22192a6918df850b2e235b209c6809fc98219e"
 
 
 def maintenance_enabled() -> bool:
@@ -80,6 +82,60 @@ def maintenance_page(error: str = "") -> str:
     </main></body></html>"""
 
 
+def dashboard_session_token(expires: int) -> str:
+    return hmac.new(
+        DASHBOARD_SIGNING_KEY.encode("utf-8"),
+        ("session:" + str(expires)).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def has_dashboard_access() -> bool:
+    raw = request.cookies.get(DASHBOARD_ACCESS_COOKIE, "")
+    try:
+        expires_text, supplied = raw.split(".", 1)
+        expires = int(expires_text)
+    except (ValueError, TypeError):
+        return False
+
+    if expires < int(datetime.now(timezone.utc).timestamp()):
+        return False
+
+    expected = dashboard_session_token(expires)
+    return hmac.compare_digest(supplied, expected)
+
+
+@app.get("/dashboard-access")
+def dashboard_access():
+    try:
+        expires = int(request.args.get("expires", "0"))
+    except ValueError:
+        expires = 0
+
+    supplied = request.args.get("signature", "")
+    now = int(datetime.now(timezone.utc).timestamp())
+    expected = hmac.new(
+        DASHBOARD_SIGNING_KEY.encode("utf-8"),
+        str(expires).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    if expires < now or expires > now + 120 or not hmac.compare_digest(supplied, expected):
+        return Response("Access denied. Open the Employee Reminder Center through the SOS Apps Dashboard.", 403)
+
+    session_expires = now + DASHBOARD_ACCESS_SECONDS
+    response = redirect("/")
+    response.set_cookie(
+        DASHBOARD_ACCESS_COOKIE,
+        str(session_expires) + "." + dashboard_session_token(session_expires),
+        max_age=DASHBOARD_ACCESS_SECONDS,
+        secure=request.is_secure or bool(os.environ.get("VERCEL")),
+        httponly=True,
+        samesite="Lax",
+    )
+    return response
+
+
 @app.before_request
 def require_admin_password():
     if request.endpoint == "maintenance_access":
@@ -94,9 +150,14 @@ def require_admin_password():
             {"Cache-Control": "no-store, no-cache, must-revalidate, private"},
         )
 
-    # Authentication is handled by the SOS Apps Dashboard before redirecting
-    # staff here. Avoid a second browser Basic Auth prompt.
-    return None
+    if has_dashboard_access():
+        return None
+
+    return Response(
+        "Access denied. Open the Employee Reminder Center through the SOS Apps Dashboard.",
+        403,
+        {"Cache-Control": "no-store, no-cache, must-revalidate, private"},
+    )
 
 
 @app.post("/maintenance-access")
