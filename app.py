@@ -28,7 +28,8 @@ app = Flask(__name__)
 # Only the SHA-256 digest is stored in this public repository. The password
 # itself is never shipped to the browser or committed to source control.
 ADMIN_PASSWORD_SHA256 = "17bd4b37413a0867e5d165476be2edd0e94b61b5eafb9217057e01a04a9a0f51"
-MAINTENANCE_COOKIE = "sos_maintenance_access"\nDASHBOARD_ACCESS_COOKIE = "sos_dashboard_access"
+MAINTENANCE_COOKIE = "sos_maintenance_access"
+DASHBOARD_ACCESS_COOKIE = "sos_dashboard_access"
 DASHBOARD_ACCESS_SECONDS = 8 * 60 * 60
 DASHBOARD_SIGNING_KEY = "389759402a476c2c751911a1ab22192a6918df850b2e235b209c6809fc98219e"
 
