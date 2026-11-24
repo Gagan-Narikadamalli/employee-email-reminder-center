@@ -25,6 +25,9 @@ from flask import Flask, Response, jsonify, redirect, request
 
 app = Flask(__name__)
 
+from calendar_reminder import calendar_reminder_bp
+app.register_blueprint(calendar_reminder_bp)
+
 # Only the SHA-256 digest is stored in this public repository. The password
 # itself is never shipped to the browser or committed to source control.
 ADMIN_PASSWORD_SHA256 = "17bd4b37413a0867e5d165476be2edd0e94b61b5eafb9217057e01a04a9a0f51"
@@ -240,7 +243,7 @@ summary { cursor:pointer; font-weight:700; color:#475467; }
 .recipient-select input { margin-top:4px; flex:0 0 auto; }
 .selected-card { border-color:var(--sos-blue); box-shadow:0 7px 22px rgba(27,117,187,.14); }
 .channel-actions { display:flex; gap:8px; flex-wrap:wrap; }
-@media (max-width:760px) { .upload,.metrics,.workbook-slots { grid-template-columns:1fr; } }
+.calendar-reminder-controls,.calendar-message-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0}.calendar-reminder-controls select,.calendar-reminder-controls input,.calendar-message-grid input,.calendar-message-grid textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;font:inherit;background:#fff}.calendar-contact-list{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:12px;margin:12px 0}.calendar-contact-row{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer}.calendar-contact-row:last-child{border-bottom:0}.calendar-contact-row.selected{background:#eef6ff}.calendar-contact-row input{margin-top:4px}.calendar-contact-row span span{display:block}.calendar-contact-row strong{display:block}.calendar-contact-row .status-warn{display:block;margin-top:3px}.calendar-reminder-card .connect-row{margin-top:12px}@media(max-width:760px){.calendar-reminder-controls,.calendar-message-grid{grid-template-columns:1fr}}@media (max-width:760px) { .upload,.metrics,.workbook-slots { grid-template-columns:1fr; } }
 """
 
 
@@ -616,7 +619,41 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
     <div class='topline'><div class='brand'><div class='brand-mark' aria-hidden='true'>SOS</div><div><span class='badge-email'>SUCCESS ON THE SPECTRUM</span><h1 style='margin-top:8px'>Employee Reminder Center</h1>
     <p class='muted' style='margin:7px 0 0'>Review outstanding documentation and send personalized email or SMS reminders.</p></div></div></div>
     <div class='info'><strong>Contacts come directly from the uploaded Excel workbook.</strong> Email opens a prepared Gmail draft. SMS sends through Twilio after confirmation. The existing employee matching and recipient workflow remains unchanged.</div>
-    <div class='card'><h2>Analyze employee reminders</h2><form id='analyzeForm' method='post' action='/analyze' enctype='multipart/form-data'><div class='upload'>
+    <section class='card calendar-reminder-card'>
+<h2>Call-Out Calendar Reminders</h2>
+<p class='muted'>Load contacts directly from either call-out calendar. This is separate from the CSV missing-appointments workflow.</<div>
+<div class='calendar-reminder-controls'>
+<div><label for='calendarSource'>Calendar source</label><select id='calendarSource'><option value='sos'>SOS Call-Out Calendar</option><option value='livingston'>SOS Livingston Call-Out Calendar</option></select></div>
+<div><label for='calendarKind'>Recipients</label><select id='calendarKind'><option value='employee'>Employees</option><option value='client'>Clients / Parents</option></select></div>
+<div><label for='calendarSearch'>Search</label><input id='calendarSearch' type='text' placeholder='Search names, email, phone'></div>
+</div>
+<div class='connect-row'><button id='calendarReload' class='secondary' type='button'>Refresh contacts</button><button id='calendarSelectAll' class='secondary' type='button'>Select visible</button><button id='calendarClear' class='secondary' type='button'>Clear selection</button><span id='calendarContactStatus' class='muted small'>Select a source to load contacts.</span></div>
+<div id='calendarContactList' class='calendar-contact-list'></div>
+<div class='calendar-message-grid'>
+<div><label for='calendarEmailSubject'>Email subject</label><input id='calendarEmailSubject' type='text' maxlength='200' value='Reminder from Success on the Spectrum'></div>
+<div><label for='calendarMessage'>Message (used for Email and Text)</label><textarea id='calendarMessage' rows='4' maxlength='1000' placeholder='Write your reminder message here...'></textarea><div class='muted small'><span id='calendarMessageCount'>0</span>/1000 characters</div></div>
+</div>
+<div class='actions'><button id='calendarEmailSelected' class='gmail' type='button' disabled>Email selected (0)</button><button id='calendarSmsSelected' class='sms' type='button' disabled>Text selected (0)</button></div>
+<div id='calendarSendStatus' class='small' aria-live='polite'></div>
+</section>
+<script>
+(function(){
+const source=document.getElementById('calendarSource'),kind=document.getElementById('calendarKind'),search=document.getElementById('calendarSearch');
+const list=document.getElementById('calendarContactList'),status=document.getElementById('calendarContactStatus'),sendStatus=document.getElementById('calendarSendStatus');
+const subject=document.getElementById('calendarEmailSubject'),message=document.getElementById('calendarMessage');
+let contacts=[],selected=new Set(),loading=false;
+function esc(v){const el=document.createElement('span');el.textContent=v||'';return el.innerHTML;}
+function fullName(c){return [c.first_name,c.last_name].filter(Boolean).join(' ').trim()||'Unnamed contact';}
+function visible(){const q=search.value.trim().toLowerCase();return contacts.filter(c=>!q||[fullName(c),c.email,c.phone_number].join(' ').toLowerCase().includes(q));}
+function updateButtons(){const chosen=contacts.filter(c=>selected.has(String(c.id)));const email=chosen.filter(c=>c.email&&c.email.includes('@')).length;const sms=chosen.filter(c=>c.phone_number).length;document.getElementById('calendarEmailSelected').textContent='Email selected ('+email+')';document.getElementById('calendarEmailSelected').disabled=email===0||!message.value.trim();document.getElementById('calendarSmsSelected').textContent='Text selected ('+sms+')';document.getElementById('calendarSmsSelected').disabled=sms===0||!message.value.trim();document.getElementById('calendarMessageCount').textContent=message.value.length;}
+function render(){const rows=visible();list.innerHTML=rows.length?rows.map(c=>{const id=String(c.id),checked=selected.has(id);return '<label class="calendar-contact-row'+(checked?' selected':'')+'"><input type="checkbox" class="calendar-contact-check" value="'+esc(id)+'" '+(checked?'checked':'')+'><span><strong>'+esc(fullName(c))+'</strong><span class="muted small">'+esc(c.email||'No email')+' · '+esc(c.phone_number||'No phone')+'</span>'+(c.on_hold?'<span class="status-warn small">On hold</span>':'')+'</span></label>';}).join(''):'<div class="muted small">No contacts match the search.</div>';list.querySelectorAll('.calendar-contact-check').forEach(box=>box.addEventListener('change',()=>{if(box.checked)selected.add(box.value);else selected.delete(box.value);render();}));updateButtons();}
+async function load(){loading=true;status.textContent='Loading contacts...';sendStatus.textContent='';list.innerHTML='';selected.clear();render();try{const response=await fetch('/calendar-contacts?source='+encodeURIComponent(source.value)+'&kind='+encodeURIComponent(kind.value),{cache:'no-store'});const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not load contacts.');contacts=data.contacts||[];status.textContent=contacts.length+' contact records loaded from '+(source.value==='sos'?'SOS':'Livingston')+'.';}catch(e){contacts=[];status.textContent=e.message;}finally{loading=false;render();}}
+function openEmails(){const chosen=contacts.filter(c=>selected.has(String(c.id))&&c.email&&c.email.includes('@'));if(!chosen.length)return;if(!message.value.trim()){sendStatus.textContent='Enter a message first.';return;}if(!confirm('Open '+chosen.length+' personalized Gmail draft(s)? You will click Send in Gmail for each message.'))return;let blocked=0;for(const c of chosen){const params=new URLSearchParams({view:'cm',fs:'1',to:c.email,su:subject.value||'Reminder from Success on the Spectrum',body:message.value.replaceAll('{first}',c.first_name||'there').replaceAll('{name}',fullName(c))});const w=window.open('https://mail.google.com/mail/?'+params.toString(),'_blank');if(!w)blocked++;}sendStatus.textContent=blocked?'Some Gmail windows were blocked. Allow pop-ups and try again.':'Opened '+chosen.length+' Gmail draft(s); review and send each draft in Gmail.';}
+async function sendSms(){const chosen=contacts.filter(c=>selected.has(String(c.id))&&c.phone_number);if(!chosen.length)return;if(!message.value.trim())return;const payload={source:source.value,kind:kind.value,recipients:chosen.map(c=>({id:c.id,name:fullName(c),phone:c.phone_number})),message:message.value};if(!confirm('Send text message to '+chosen.length+' selected contact(s)?'))return;const button=document.getElementById('calendarSmsSelected');button.disabled=true;sendStatus.textContent='Sending text messages...';try{const response=await fetch('/calendar-contacts-send-sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||'SMS sending failed.');sendStatus.textContent=data.message;}catch(e){sendStatus.textContent=e.message;}finally{updateButtons();}}
+source.addEventListener('change',load);kind.addEventListener('change',load);search.addEventListener('input',render);document.getElementById('calendarReload').addEventListener('click',load);document.getElementById('calendarSelectAll').addEventListener('click',()=>visible().forEach(c=>selected.add(String(c.id))));document.getElementById('calendarClear').addEventListener('click',()=>selected.clear());document.getElementById('calendarSelectAll').addEventListener('click',render);document.getElementById('calendarClear').addEventListener('click',render);document.getElementById('calendarEmailSelected').addEventListener('click',openEmails);document.getElementById('calendarSmsSelected').addEventListener('click',sendSms);message.addEventListener('input',updateButtons);load();
+})();
+</script>
+<div class='card'><h2>Analyze employee reminders</h2><form id='analyzeForm' method='post' action='/analyze' enctype='multipart/form-data'><div class='upload'>
       <div><label>Unfiltered appointments CSV</label><input type='file' name='csv_file' accept='.csv' required><div class='muted small' style='margin-top:6px'>Converted, cancelled, deleted, and non-convertible rows are removed automatically.</div></div>
       <div><label>Employee contacts Excel</label><input id='xlsxFile' type='file' name='xlsx_file' accept='.xlsx'>
       <div id='savedWorkbookStatus' class='muted small' style='margin-top:6px'>Checking for saved employee workbooks...</div>
