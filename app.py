@@ -621,7 +621,7 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
     <div class='info'><strong>Contacts come directly from the uploaded Excel workbook.</strong> Email opens a prepared Gmail draft. SMS sends through Twilio after confirmation. The existing employee matching and recipient workflow remains unchanged.</div>
     <section class='card calendar-reminder-card'>
 <h2>Call-Out Calendar Reminders</h2>
-<p class='muted'>Load contacts directly from either call-out calendar. This is separate from the CSV missing-appointments workflow.</<div>
+<p class='muted'>Load contacts directly from either call-out calendar. This is separate from the CSV missing-appointments workflow.</p>
 <div class='calendar-reminder-controls'>
 <div><label for='calendarSource'>Calendar source</label><select id='calendarSource'><option value='sos'>SOS Call-Out Calendar</option><option value='livingston'>SOS Livingston Call-Out Calendar</option></select></div>
 <div><label for='calendarKind'>Recipients</label><select id='calendarKind'><option value='employee'>Employees</option><option value='client'>Clients / Parents</option></select></div>
