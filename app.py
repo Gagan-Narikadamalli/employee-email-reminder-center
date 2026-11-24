@@ -25,7 +25,7 @@ from flask import Flask, Response, jsonify, redirect, request
 
 app = Flask(__name__)
 
-from calendar_reminder import calendar_reminder_bp
+from calendar_reminder import calendar_reminder_bp, fetch_calendar_contacts
 app.register_blueprint(calendar_reminder_bp)
 
 # Only the SHA-256 digest is stored in this public repository. The password
@@ -440,9 +440,33 @@ def _safe_unique_contact(candidates: list[dict]) -> dict | None:
     return None
 
 
-def analyze_files(csv_bytes: bytes, xlsx_bytes: bytes) -> dict:
+def fetch_analysis_contacts(source: str) -> tuple[list[dict], str]:
+    source_labels = {
+        "sos": "Parsippany — SOS Call-Out Calendar",
+        "livingston": "Livingston — SOS Livingston Call-Out Calendar",
+    }
+    if source not in source_labels:
+        raise ValueError("Choose Parsippany or Livingston as the employee contact source.")
+    rows = fetch_calendar_contacts(source, "employee")
+    contacts = []
+    for row in rows:
+        name = " ".join(part for part in [str(row.get("first_name") or "").strip(), str(row.get("last_name") or "").strip()] if part)
+        if not name:
+            continue
+        contacts.append({
+            "Employee": name,
+            "Email": str(row.get("email") or "").strip(),
+            "Phone": str(row.get("phone_number") or "").strip(),
+        })
+    return contacts, source_labels[source]
+
+
+def analyze_files(csv_bytes: bytes, xlsx_bytes: bytes, calendar_contacts: list[dict] | None = None, contact_source_label: str = "selected call-out calendar") -> dict:
     missing, filter_stats = read_missing_csv(csv_bytes)
-    contacts = read_employee_contacts_xlsx(xlsx_bytes)
+    if calendar_contacts is not None:
+        contacts = calendar_contacts
+    else:
+        contacts = read_employee_contacts_xlsx(xlsx_bytes)
 
     # Principal1Name is the only matching key. Email addresses and phone numbers
     # are always taken from the matched Employee Contact Info row in the workbook.
@@ -497,17 +521,17 @@ def analyze_files(csv_bytes: bytes, xlsx_bytes: bytes) -> dict:
             contact = _safe_unique_contact(candidates)
             if contact:
                 match_method = "name"
-                match_note = "Matched CSV Principal1Name to Excel Employee. Email and phone come from Employee Contact Info."
+                match_note = "Matched CSV Principal1Name to {contact_source_label} employee. Email and phone come from the selected calendar."
             elif candidates:
                 match_note = "Employee name appears multiple times with conflicting contact details in Employee Contact Info."
             else:
-                match_note = "CSV Principal1Name was not found in the Excel Employee column."
+                match_note = "CSV Principal1Name was not found in {contact_source_label} employee list."
         elif len(normalized_names) > 1:
             match_note = "CSV contains multiple different employee names for the same group; review before sending."
         else:
             match_note = "CSV Principal1Name is blank or invalid; review before sending."
 
-        # Employee Contact Info is authoritative for the final recipient identity.
+        # The selected calendar is authoritative for the final recipient identity.
         # If no safe contact exists, show the most common CSV name only for review.
         if contact:
             display_name = (contact.get("Employee") or "Unknown employee").strip()
@@ -618,7 +642,7 @@ def page(result: dict | None = None, error: str | None = None, notice: str | Non
     parts = [f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Employee Reminder Center | SOS</title><style>{CSS}</style></head><body><main>
     <div class='topline'><div class='brand'><div class='brand-mark' aria-hidden='true'>SOS</div><div><span class='badge-email'>SUCCESS ON THE SPECTRUM</span><h1 style='margin-top:8px'>Employee Reminder Center</h1>
     <p class='muted' style='margin:7px 0 0'>Review outstanding documentation and send personalized email or SMS reminders.</p></div></div></div>
-    <div class='info'><strong>Contacts come directly from the uploaded Excel workbook.</strong> Email opens a prepared Gmail draft. SMS sends through Twilio after confirmation. The existing employee matching and recipient workflow remains unchanged.</div>
+    <div class='info'><strong>Employee contacts are pulled directly from the selected call-out calendar.</strong> Email opens a prepared Gmail draft. SMS sends through Twilio after confirmation. The existing employee matching and recipient workflow remains unchanged.</div>
     <section class='card calendar-reminder-card'>
 <h2>Call-Out Calendar Reminders</h2>
 <p class='muted'>Load contacts directly from either call-out calendar. This is separate from the CSV missing-appointments workflow.</p>
@@ -655,14 +679,9 @@ source.addEventListener('change',load);kind.addEventListener('change',load);sear
 </script>
 <div class='card'><h2>Analyze employee reminders</h2><form id='analyzeForm' method='post' action='/analyze' enctype='multipart/form-data'><div class='upload'>
       <div><label>Unfiltered appointments CSV</label><input type='file' name='csv_file' accept='.csv' required><div class='muted small' style='margin-top:6px'>Converted, cancelled, deleted, and non-convertible rows are removed automatically.</div></div>
-      <div><label>Employee contacts Excel</label><input id='xlsxFile' type='file' name='xlsx_file' accept='.xlsx'>
-      <div id='savedWorkbookStatus' class='muted small' style='margin-top:6px'>Checking for saved employee workbooks...</div>
-      <div id='savedWorkbookSlots' class='workbook-slots' aria-label='Saved employee workbooks'></div></div>
+      <div><label>Employee contact source</label><select name='contact_source' id='contactSource' required style='width:100%;padding:10px;border:1px solid #d0d5dd;border-radius:9px;font:inherit;background:#fff'><option value='sos'>Parsippany — SOS Call-Out Calendar</option><option value='livingston'>Livingston — SOS Livingston Call-Out Calendar</option></select><div class='muted small' style='margin-top:6px'>Employee names, email addresses, and phone numbers are fetched automatically from the selected calendar when you analyze the CSV.</div></div>
     </div>
-    <div class='connect-row' style='margin-top:12px'><input id='saveWorkbook' type='checkbox'><label for='saveWorkbook' style='margin:0'>Save this employee workbook in this browser</label></div>
-    <div id='saveTargetPanel' hidden style='margin-top:10px'><strong>Choose which saved Excel workbook to replace</strong><div id='saveTargetSlots' class='workbook-slots'></div></div>
-    <div class='muted small' style='margin-top:5px'>Saving is off until selected. When saving, choose Slot 1 or Slot 2 so the other location’s workbook stays unchanged.</div>
-    <div class='actions'><button class='primary' type='submit'>Analyze Files</button><button id='clearSavedWorkbook' class='secondary' type='button'>Remove both saved workbooks</button></div>
+    <div class='actions'><button class='primary' type='submit'>Analyze CSV</button></div>
     <div id='analyzeStatus' class='muted small' style='margin-top:8px'></div></form></div>"""]
 
     if error:
@@ -691,7 +710,7 @@ source.addEventListener('change',load);kind.addEventListener('change',load);sear
         </div>
         <div class='card'>
           <div class='employee-head'><div><h2>Text eligible employees</h2>
-          <div class='muted'>{len(sms_candidates)} matched employee{'s' if len(sms_candidates) != 1 else ''} have a valid phone number from the uploaded workbook.</div>
+          <div class='muted'>{len(sms_candidates)} matched employee{'s' if len(sms_candidates) != 1 else ''} have a valid phone number from the selected call-out calendar.</div>
           <div class='muted small'>No message is sent until you confirm. Rows without a valid phone number are skipped.</div></div></div>
           <form id='bulkSmsForm' class='sms-send-form' method='post' action='/send-sms' data-bulk='true' data-confirm='Send an SMS to the selected employees who have a valid phone number?'>
             <input type='hidden' name='payload' value='{esc(bulk_payload)}'><input type='hidden' name='signature' value='{esc(bulk_signature)}'>
@@ -774,151 +793,21 @@ source.addEventListener('change',load);kind.addEventListener('change',load);sear
 
     parts.append("""
     <script>
-    const workbookDbName = 'employee-reminder-center';
-    const workbookStore = 'saved-files';
-    const workbookStatusCacheKey = 'employee-reminder-saved-workbooks';
-    let workbookDbPromise = null;
-    function openWorkbookDb() {
-      if (workbookDbPromise) return workbookDbPromise;
-      workbookDbPromise = new Promise((resolve, reject) => {
-        const req = indexedDB.open(workbookDbName, 1);
-        req.onupgradeneeded = () => req.result.createObjectStore(workbookStore, {keyPath:'id'});
-        req.onsuccess = () => {
-          const db = req.result;
-          db.onversionchange = () => { db.close(); workbookDbPromise = null; };
-          resolve(db);
-        };
-        req.onerror = () => { workbookDbPromise = null; reject(req.error); };
-        req.onblocked = () => { workbookDbPromise = null; reject(new Error('Saved workbook storage is temporarily busy.')); };
-      });
-      return workbookDbPromise;
-    }
-    async function getWorkbook(id) {
-      const db = await openWorkbookDb();
-      return new Promise((resolve, reject) => {
-        const req = db.transaction(workbookStore).objectStore(workbookStore).get(id);
-        req.onsuccess = () => resolve(req.result || null);
-        req.onerror = () => reject(req.error);
-      });
-    }
-    async function savedWorkbooks() {
-      const db = await openWorkbookDb();
-      const [slot1, slot2, legacy] = await new Promise((resolve, reject) => {
-        const tx = db.transaction(workbookStore);
-        const store = tx.objectStore(workbookStore);
-        const requests = [
-          store.get('employee-contacts-1'),
-          store.get('employee-contacts-2'),
-          store.get('employee-contacts')
-        ];
-        tx.oncomplete = () => resolve(requests.map(req => req.result || null));
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error || new Error('Could not read saved workbooks.'));
-      });
-      if (!slot1 && legacy) {
-        const db = await openWorkbookDb();
-        await new Promise((resolve, reject) => {
-          const tx = db.transaction(workbookStore, 'readwrite');
-          tx.objectStore(workbookStore).put({...legacy, id:'employee-contacts-1'});
-          tx.objectStore(workbookStore).delete('employee-contacts');
-          tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
-        });
-        return [await getWorkbook('employee-contacts-1'), slot2];
-      }
-      return [slot1, slot2];
-    }
-    async function storeWorkbook(file, slot) {
-      const db = await openWorkbookDb();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(workbookStore, 'readwrite');
-        tx.objectStore(workbookStore).put({id:`employee-contacts-${slot}`, name:file.name, type:file.type, blob:file, savedAt:Date.now()});
-        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
-      });
-    }
-    async function removeWorkbooks() {
-      const db = await openWorkbookDb();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(workbookStore, 'readwrite');
-        const store = tx.objectStore(workbookStore);
-        store.delete('employee-contacts');
-        store.delete('employee-contacts-1');
-        store.delete('employee-contacts-2');
-        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
-      });
-    }
-    function renderWorkbookStatus(saved) {
-      const node = document.getElementById('savedWorkbookStatus');
-      const slotsNode = document.getElementById('savedWorkbookSlots');
-      const saveTargetSlots = document.getElementById('saveTargetSlots');
-      if (!node) return;
-      const count = saved.filter(Boolean).length;
-      node.textContent = count ? `${count} saved workbook${count === 1 ? '' : 's'} available. Choose a slot or upload a new Excel file.` : 'No workbook is saved. Upload one, then select “Save” if you want to keep it.';
-      if (slotsNode) slotsNode.innerHTML = saved.map((item, index) => {
-        const slot = index + 1;
-        const name = item ? item.name : 'Empty';
-        return `<label class="workbook-slot"><input type="radio" name="saved_workbook_slot" value="${slot}"${item ? '' : ' disabled'}><span><strong>Analyze with Saved Excel ${slot}</strong><span class="workbook-slot-name">${escapeHtml(name)}</span></span></label>`;
-      }).join('');
-      if (saveTargetSlots) saveTargetSlots.innerHTML = saved.map((item, index) => {
-        const slot = index + 1;
-        const name = item ? item.name : 'Empty slot';
-        return `<label class="workbook-slot"><input type="radio" name="save_workbook_slot" value="${slot}"><span><strong>Replace Saved Excel ${slot}</strong><span class="workbook-slot-name">${escapeHtml(name)}</span></span></label>`;
-      }).join('');
-    }
-    async function refreshWorkbookStatus() {
-      const node = document.getElementById('savedWorkbookStatus');
-      if (!node) return;
-      try {
-        const saved = await savedWorkbooks();
-        renderWorkbookStatus(saved);
-        sessionStorage.setItem(workbookStatusCacheKey, JSON.stringify(saved.map(item => item ? {name:item.name} : null)));
-      } catch (_) {
-        if (!document.querySelector('input[name="saved_workbook_slot"]')) node.textContent = 'This browser could not access saved file storage.';
-      }
-    }
-    function escapeHtml(value) {
-      const node = document.createElement('div');
-      node.textContent = value || '';
-      return node.innerHTML;
-    }
     const analyzeForm = document.getElementById('analyzeForm');
-    const saveWorkbookCheckbox = document.getElementById('saveWorkbook');
-    if (saveWorkbookCheckbox) saveWorkbookCheckbox.addEventListener('change', () => {
-      document.getElementById('saveTargetPanel').hidden = !saveWorkbookCheckbox.checked;
-      if (!saveWorkbookCheckbox.checked) document.querySelectorAll('input[name="save_workbook_slot"]').forEach(input => input.checked = false);
-    });
     if (analyzeForm) analyzeForm.addEventListener('submit', async event => {
       event.preventDefault();
       const status = document.getElementById('analyzeStatus');
-      const selected = document.getElementById('xlsxFile').files[0];
-      let workbook = selected;
+      status.textContent = 'Fetching calendar contacts and analyzing CSV...';
+      status.className = 'muted small';
+      const data = new FormData(analyzeForm);
       try {
-        if (saveWorkbookCheckbox.checked) {
-          if (!selected) throw new Error('Choose a new employee Excel workbook before selecting Save. To use an existing workbook, leave Save unchecked and choose an Analyze slot.');
-          const target = document.querySelector('input[name="save_workbook_slot"]:checked');
-          if (!target) throw new Error('Choose Saved Excel 1 or Saved Excel 2 to replace.');
-          const current = await getWorkbook(`employee-contacts-${target.value}`);
-          if (current && !confirm(`Replace “${current.name}” in Saved Excel ${target.value} with “${selected.name}”?`)) return;
-          await storeWorkbook(selected, target.value);
-          await refreshWorkbookStatus();
-        }
-        if (!workbook) {
-          const slot = document.querySelector('input[name="saved_workbook_slot"]:checked');
-          const saved = slot ? await getWorkbook(`employee-contacts-${slot.value}`) : null;
-          if (saved) workbook = new File([saved.blob], saved.name, {type:saved.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-        }
-        if (!workbook) throw new Error('Choose Saved Excel 1 or Saved Excel 2 to analyze, or upload a new employee Excel workbook.');
-        status.textContent = 'Analyzing files...';
-        const data = new FormData(analyzeForm);
-        data.set('xlsx_file', workbook, workbook.name);
         const response = await fetch('/analyze', {method:'POST', body:data});
         const body = await response.text();
         document.open(); document.write(body); document.close();
-      } catch (error) { status.textContent = error.message; status.className = 'status-bad small'; }
-    });
-    const clearButton = document.getElementById('clearSavedWorkbook');
-    if (clearButton) clearButton.addEventListener('click', async () => {
-      if (!confirm('Remove both saved employee workbooks from this browser?')) return;
-      await removeWorkbooks(); await refreshWorkbookStatus();
+      } catch (error) {
+        status.textContent = error.message || 'Analysis failed.';
+        status.className = 'status-bad small';
+      }
     });
     document.querySelectorAll('.sms-send-form').forEach(form => form.addEventListener('submit', async event => {
       event.preventDefault();
@@ -942,11 +831,6 @@ source.addEventListener('change',load);kind.addEventListener('change',load);sear
     }));
     const customMessage = document.getElementById('customMessage');
     if (customMessage) customMessage.addEventListener('input', () => { document.getElementById('customCount').textContent = customMessage.value.length; });
-    try {
-      const cachedWorkbooks = JSON.parse(sessionStorage.getItem(workbookStatusCacheKey) || 'null');
-      if (Array.isArray(cachedWorkbooks) && cachedWorkbooks.length === 2) renderWorkbookStatus(cachedWorkbooks);
-    } catch (_) {}
-    refreshWorkbookStatus();
     </script></main></body></html>""")
     return "".join(parts)
 
@@ -985,7 +869,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/analyze":
             try:
                 fields = parse_multipart(self)
-                result = analyze_files(fields.get("csv_file", b""), fields.get("xlsx_file", b""))
+                contacts, source_label = fetch_analysis_contacts(fields.get("contact_source", b"sos").decode("utf-8", errors="ignore") or "sos")
+                result = analyze_files(fields.get("csv_file", b""), b"", calendar_contacts=contacts, contact_source_label=source_label)
                 ANALYSES[result["analysis_id"]] = result
                 self.send_html(page(result))
             except Exception as exc:
@@ -1028,10 +913,11 @@ def flask_health():
 def flask_analyze():
     try:
         csv_file = request.files.get("csv_file")
-        xlsx_file = request.files.get("xlsx_file")
-        if not csv_file or not xlsx_file:
-            raise ValueError("Both the CSV and Excel workbook are required.")
-        result = analyze_files(csv_file.read(), xlsx_file.read())
+        source = (request.form.get("contact_source") or "sos").strip()
+        if not csv_file:
+            raise ValueError("Upload the missing-appointments CSV.")
+        contacts, source_label = fetch_analysis_contacts(source)
+        result = analyze_files(csv_file.read(), b"", calendar_contacts=contacts, contact_source_label=source_label)
         return page(result)
     except Exception as exc:
         return page(error=str(exc)), 400
