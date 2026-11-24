@@ -11,6 +11,7 @@ import os
 import re
 import urllib.parse
 import urllib.request
+import urllib.error
 import uuid
 import webbrowser
 import zipfile
@@ -447,7 +448,12 @@ def fetch_analysis_contacts(source: str) -> tuple[list[dict], str]:
     }
     if source not in source_labels:
         raise ValueError("Choose Parsippany or Livingston as the employee contact source.")
-    rows = fetch_calendar_contacts(source, "employee")
+    try:
+        rows = fetch_calendar_contacts(source, "employee")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Could not retrieve contacts from {source_labels[source]} (HTTP {exc.code}). Check the calendar connection.") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Could not connect to {source_labels[source]}. Check the calendar connection.") from exc
     contacts = []
     for row in rows:
         name = " ".join(part for part in [str(row.get("first_name") or "").strip(), str(row.get("last_name") or "").strip()] if part)
@@ -468,8 +474,7 @@ def analyze_files(csv_bytes: bytes, xlsx_bytes: bytes, calendar_contacts: list[d
     else:
         contacts = read_employee_contacts_xlsx(xlsx_bytes)
 
-    # Principal1Name is the only matching key. Email addresses and phone numbers
-    # are always taken from the matched Employee Contact Info row in the workbook.
+    # Principal1Name is the only matching key. Calendar contacts are authoritative for email and phone.
     contacts_by_name: dict[str, list[dict]] = {}
     for contact in contacts:
         name_key = normalize_name(contact.get("Employee"))
@@ -513,19 +518,18 @@ def analyze_files(csv_bytes: bytes, xlsx_bytes: bytes, calendar_contacts: list[d
         match_method = "none"
         match_note = ""
 
-        # Match CSV Principal1Name to Excel Employee. The Excel sheet is the sole
-        # source for the final email address and phone number.
+        # Match CSV Principal1Name to the selected calendar employee. Calendar contact details are authoritative.
         normalized_names = list(dict.fromkeys(normalize_name(n) for n in csv_names if normalize_name(n)))
         if len(normalized_names) == 1:
             candidates = contacts_by_name.get(normalized_names[0], [])
             contact = _safe_unique_contact(candidates)
             if contact:
                 match_method = "name"
-                match_note = "Matched CSV Principal1Name to {contact_source_label} employee. Email and phone come from the selected calendar."
+                match_note = f"Matched CSV Principal1Name to {contact_source_label} employee. Email and phone come from the selected calendar."
             elif candidates:
-                match_note = "Employee name appears multiple times with conflicting contact details in Employee Contact Info."
+                match_note = f"Employee appears multiple times with conflicting contact details in {contact_source_label}. Review before sending."
             else:
-                match_note = "CSV Principal1Name was not found in {contact_source_label} employee list."
+                match_note = f"CSV Principal1Name was not found in {contact_source_label} employee list."
         elif len(normalized_names) > 1:
             match_note = "CSV contains multiple different employee names for the same group; review before sending."
         else:
@@ -593,6 +597,7 @@ def analyze_files(csv_bytes: bytes, xlsx_bytes: bytes, calendar_contacts: list[d
         "contact_count": sum(bool(e["contact_found"]) for e in employees),
         "review_count": sum(bool(e["review_needed"]) for e in employees),
         "employees": employees,
+        "contact_source_label": contact_source_label,
     }
 
 
@@ -699,6 +704,7 @@ source.addEventListener('change',load);kind.addEventListener('change',load);sear
         else:
             bulk_action = "<button class='secondary' type='button' disabled>Open All in Gmail</button>"
         parts.append(f"""
+        <div class='info'><strong>Employee contacts used:</strong> {esc(result.get('contact_source_label') or 'Selected call-out calendar')}</div>
         <div class='metrics'>
           <div class='metric'><span class='muted'>Unconverted appointments</span><strong>{result['total_missing']}</strong><span class='muted small'>{result['filter_stats']['excluded_converted']} already converted row{'s' if result['filter_stats']['excluded_converted'] != 1 else ''} excluded</span></div>
           <div class='metric'><span class='muted'>Employees</span><strong>{result['employee_count']}</strong></div>
