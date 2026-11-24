@@ -14,7 +14,7 @@ SOURCES = {
 }
 
 def normalize_phone(value):
-    digits = re.sub(r"\\D", "", value or "")
+    digits = re.sub(r"\D", "", value or "")
     if len(digits) == 10:
         digits = "1" + digits
     return "+" + digits if 11 <= len(digits) <= 15 else ""
