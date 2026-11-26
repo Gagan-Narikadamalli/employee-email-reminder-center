@@ -685,7 +685,9 @@ source.addEventListener('change',load);kind.addEventListener('change',load);sear
 </script>
 <div class='card'><h2>Analyze employee reminders</h2><form id='analyzeForm' method='post' action='/analyze' enctype='multipart/form-data'><div class='upload'>
       <div><label>Unfiltered appointments CSV</label><input type='file' name='csv_file' accept='.csv' required><div class='muted small' style='margin-top:6px'>Converted, cancelled, deleted, and non-convertible rows are removed automatically.</div></div>
-      <div><label>Employee contact source</label><select name='contact_source' id='contactSource' required style='width:100%;padding:10px;border:1px solid #d0d5dd;border-radius:9px;font:inherit;background:#fff'><option value='sos'>Parsippany — SOS Call-Out Calendar</option><option value='livingston'>Livingston — SOS Livingston Call-Out Calendar</option></select><div class='muted small' style='margin-top:6px'>Employee names, email addresses, and phone numbers are fetched automatically from the selected calendar when you analyze the CSV.</div></div>
+      <div style='grid-column:1/-1'><label>Employee contact matching method</label><div class='connect-row' style='margin:8px 0'><label style='font-weight:500'><input type='radio' name='contact_method' value='excel' checked> Option 1: Upload employee contact Excel</label><label style='font-weight:500'><input type='radio' name='contact_method' value='calendar'> Option 2: Use call-out calendar contacts</label></div>
+      <div id='excelContactOption'><label>Employee contact Excel file</label><input type='file' name='xlsx_file' id='xlsxFile' accept='.xlsx'><div class='muted small' style='margin-top:6px'>Use the previous Employee Contact Info workbook with Employee, Email, and Phone columns.</div></div>
+      <div id='calendarContactOption' style='display:none'><label>Employee contact source</label><select name='contact_source' id='contactSource' style='width:100%;padding:10px;border:1px solid #d0d5dd;border-radius:9px;font:inherit;background:#fff'><option value='sos'>Parsippany — SOS Call-Out Calendar</option><option value='livingston'>Livingston — SOS Livingston Call-Out Calendar</option></select><div class='muted small' style='margin-top:6px'>Employee names, email addresses, and phone numbers are fetched automatically from the selected calendar when you analyze the CSV.</div></div></div>
     </div>
     <div class='actions'><button class='primary' type='submit'>Analyze CSV</button></div>
     <div id='analyzeStatus' class='muted small' style='margin-top:8px'></div></form></div>"""]
@@ -801,6 +803,16 @@ source.addEventListener('change',load);kind.addEventListener('change',load);sear
     parts.append("""
     <script>
     const analyzeForm = document.getElementById('analyzeForm');
+    const excelOption = document.getElementById('excelContactOption'), calendarOption = document.getElementById('calendarContactOption');
+    const xlsxFile = document.getElementById('xlsxFile');
+    function updateContactMethod() {
+      const method = analyzeForm.querySelector('input[name=contact_method]:checked')?.value || 'excel';
+      if (excelOption) excelOption.style.display = method === 'excel' ? '' : 'none';
+      if (calendarOption) calendarOption.style.display = method === 'calendar' ? '' : 'none';
+      if (xlsxFile) xlsxFile.required = method === 'excel';
+    }
+    if (analyzeForm) analyzeForm.querySelectorAll('input[name=contact_method]').forEach(radio => radio.addEventListener('change', updateContactMethod));
+    updateContactMethod();
     if (analyzeForm) analyzeForm.addEventListener('submit', async event => {
       event.preventDefault();
       const status = document.getElementById('analyzeStatus');
@@ -876,8 +888,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/analyze":
             try:
                 fields = parse_multipart(self)
-                contacts, source_label = fetch_analysis_contacts(fields.get("contact_source", b"sos").decode("utf-8", errors="ignore") or "sos")
-                result = analyze_files(fields.get("csv_file", b""), b"", calendar_contacts=contacts, contact_source_label=source_label)
+                method = fields.get("contact_method", b"excel").decode("utf-8", errors="ignore") or "excel"
+                csv_bytes = fields.get("csv_file", b"")
+                if method == "excel":
+                    xlsx_bytes = fields.get("xlsx_file", b"")
+                    if not xlsx_bytes:
+                        raise ValueError("Upload the employee contact Excel file for Option 1.")
+                    result = analyze_files(csv_bytes, xlsx_bytes, contact_source_label="Uploaded employee contact Excel")
+                elif method == "calendar":
+                    source = fields.get("contact_source", b"sos").decode("utf-8", errors="ignore") or "sos"
+                    contacts, source_label = fetch_analysis_contacts(source)
+                    result = analyze_files(csv_bytes, b"", calendar_contacts=contacts, contact_source_label=source_label)
+                else:
+                    raise ValueError("Choose Excel upload or call-out calendar contacts.")
                 ANALYSES[result["analysis_id"]] = result
                 self.send_html(page(result))
             except Exception as exc:
@@ -920,11 +943,20 @@ def flask_health():
 def flask_analyze():
     try:
         csv_file = request.files.get("csv_file")
-        source = (request.form.get("contact_source") or "sos").strip()
+        contact_method = (request.form.get("contact_method") or "excel").strip()
         if not csv_file:
             raise ValueError("Upload the missing-appointments CSV.")
-        contacts, source_label = fetch_analysis_contacts(source)
-        result = analyze_files(csv_file.read(), b"", calendar_contacts=contacts, contact_source_label=source_label)
+        if contact_method == "excel":
+            xlsx_file = request.files.get("xlsx_file")
+            if not xlsx_file or not xlsx_file.filename:
+                raise ValueError("Upload the employee contact Excel file for Option 1.")
+            result = analyze_files(csv_file.read(), xlsx_file.read(), contact_source_label="Uploaded employee contact Excel")
+        elif contact_method == "calendar":
+            source = (request.form.get("contact_source") or "sos").strip()
+            contacts, source_label = fetch_analysis_contacts(source)
+            result = analyze_files(csv_file.read(), b"", calendar_contacts=contacts, contact_source_label=source_label)
+        else:
+            raise ValueError("Choose Excel upload or call-out calendar contacts.")
         return page(result)
     except Exception as exc:
         return page(error=str(exc)), 400
